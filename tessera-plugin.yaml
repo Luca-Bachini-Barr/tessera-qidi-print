@@ -3,7 +3,7 @@
 # temperatures. The sensors come from the Moonraker integration and, for the filament, the QIDI Box integration. Every
 # name, label and hint is a key into translations/<language>.json, part "app".
 id: qidi_print
-version: 0.1.0
+version: 0.2.0
 api: "0.27"
 icon: printer-3d
 maintainer: Luca-Bachini-Barr
@@ -13,7 +13,11 @@ topics: [home]
 requires:
   esphome: 2026.6.2
 boards: any
-flash_kb: 24
+flash_kb: 28
+
+permissions:
+  # The keys on the tile and the card press the printer's own Pause, Resume and Cancel buttons.
+  home_assistant_actions: [button.press]
 
 tiles:
   - id: print
@@ -21,8 +25,8 @@ tiles:
     icon: printer-3d
     sizes: { min: 2x1, max: 4x4, full: true }
     # The tile, its readings and its parts live in PSRAM on the boards with pictures; this is a board without PSRAM's
-    # share for about 34 labels and blocks.
-    memory: 3600
+    # share for about 34 labels and blocks, and the 9 of the keys.
+    memory: 4600
     # The tile's own entity: the printer's thumbnail camera (its picture shows beside the print), or, on a screen
     # without pictures, any of the printer's sensors.
     domains: [camera, sensor]
@@ -48,6 +52,13 @@ tiles:
       - { id: slot2, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_2_filament], default: sensor.dining_room_q2_box_slot_2_filament, label: opt_slot2, group: group_box }
       - { id: slot3, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_3_filament], default: sensor.dining_room_q2_box_slot_3_filament, label: opt_slot3, group: group_box }
       - { id: slot4, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_4_filament], default: sensor.dining_room_q2_box_slot_4_filament, label: opt_slot4, group: group_box }
+      # The keys: the Moonraker buttons they press, and the camera the Camera key opens.
+      - { id: pause, kind: entity, domains: [button], matches: [pause_print], default: button.q2_pause_print, label: opt_pause, group: group_controls }
+      - { id: resume, kind: entity, domains: [button], matches: [resume_print], default: button.q2_resume_print, label: opt_resume, group: group_controls }
+      - { id: cancel, kind: entity, domains: [button], matches: [cancel_print], default: button.q2_cancel_print, label: opt_cancel, hint: opt_cancel_hint, group: group_controls }
+      # Moonraker names a camera after its webcam's name in Moonraker: these are the usual ones.
+      - { id: camera, kind: entity, domains: [camera], matches: [qidi, webcam, camera, cam, default], default: camera.q2_qidi, label: opt_camera, hint: opt_camera_hint, group: group_controls }
 
 cards:
   - { id: detail, name: card_name, wide: true, pictures: 1 }
+  - { id: camera, name: card_camera, wide: true, pictures: 1 }

@@ -1,5 +1,7 @@
 {
-  "_meta": { "name": "English" },
+  "_meta": {
+    "name": "English"
+  },
   "screen": {
     "choose": "Choose the printer in the tile settings",
     "too_much": "Too many sensors for one tile",
@@ -19,7 +21,6 @@
     "took": "Took {time}",
     "elapsed": "Printing for {time}",
     "layer": "Layer {layer} of {layers}",
-    "layer_only": "Layer {layer}",
     "layer_short": "L {layer}/{layers}",
     "hours_minutes": "{h} h {m} min",
     "minutes": "{m} min",
@@ -30,7 +31,13 @@
     "nozzle": "Nozzle {t}",
     "bed": "Bed {t}",
     "chamber": "Chamber {t}",
-    "speed": "{v} mm/s"
+    "speed": "{v} mm/s",
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Stop",
+    "stop_confirm": "Tap again to stop",
+    "camera": "Camera",
+    "no_camera": "The camera has no picture"
   },
   "app": {
     "name": "QIDI print",
@@ -57,6 +64,14 @@
     "opt_slot4": "Box slot 4",
     "opt_slot_hint": "The QIDI Box integration's slot sensors: the active slot is the filament in use.",
     "group_temps": "Temperatures and speed",
-    "group_box": "QIDI Box"
+    "group_box": "QIDI Box",
+    "card_camera": "Camera",
+    "opt_pause": "Pause button",
+    "opt_resume": "Resume button",
+    "opt_cancel": "Cancel button",
+    "opt_cancel_hint": "Stop asks for a second tap within 5 seconds before it cancels the print.",
+    "opt_camera": "Printer camera",
+    "opt_camera_hint": "The camera the Camera key opens, full screen.",
+    "group_controls": "Keys"
   }
 }
