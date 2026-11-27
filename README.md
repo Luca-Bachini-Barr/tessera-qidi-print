@@ -1,13 +1,14 @@
 # QIDI print
 
 How a print on your QIDI printer is coming along, on your Tessera screen. Works with any Klipper printer that Home
-Assistant's Moonraker integration knows, and reads the filament from the QIDI Box integration.
+Assistant's Moonraker integration knows. Every reading comes from that integration, the QIDI Box's too.
 
 ## What it shows
 
 - **The tile**: the file being printed, its thumbnail, a progress bar, the percent, the time left and the time it will
   finish, the layer (12 of 140), how long it has been printing, the filament in use (its colour, type and metres used),
-  and the nozzle, bed and chamber temperatures. A small tile shows the file, the percent, the time left and the bar. The
+  and the nozzle, bed and chamber temperatures. On a QIDI Box it also shows each step of a filament change (Cutting
+  filament, Unloading filament, Loading 1D, Purging 1D), Box warnings, and Box drying. A small tile shows the file, the percent, the time left and the bar. The
   tile turns yellow while the print is paused and red when it failed.
 - **The card**: tap the tile. All of it at the size of the screen, the thumbnail large, and the QIDI Box slots at the
   bottom, with the slot in use outlined. Tap the card to close it.
@@ -21,10 +22,11 @@ Assistant's Moonraker integration knows, and reads the filament from the QIDI Bo
 
 - A QIDI printer (or any Klipper printer) in Home Assistant's [Moonraker integration](https://github.com/marcolivierarsenault/moonraker-home-assistant):
   the Q1 Pro, Plus4, Q2, X-Max 3, X-Plus 3 and the other models that run Klipper.
-- For the filament colours and the Box slots: the **Box Slot N Filament** sensors. Support for them in the Moonraker
-  integration itself is proposed; until then the [QIDI Box integration](https://github.com/Luca-Bachini-Barr/ha-qidi-box)
-  adds them. Without a Box, or without those sensors, the plugin works the same and the filament line shows the
-  metres used alone. The tile shows the first Box (four slots).
+- For the Box: the Moonraker integration's **Box Slot N Filament**, **Box Filament Change**, **Box Warnings** and
+  **Box 1 Drying** sensors. They are proposed for the Moonraker integration
+  ([#859](https://github.com/marcolivierarsenault/moonraker-home-assistant/pull/859)) and appear only on a printer
+  with a Box. Without them the plugin works the same and the filament line shows the metres used alone. The tile
+  shows the first Box (four slots).
 - A camera is optional. Without one there is no Camera key; the print's thumbnail still shows, because Moonraker makes
   a thumbnail camera for every printer.
 
@@ -34,7 +36,7 @@ Assistant's Moonraker integration knows, and reads the filament from the QIDI Bo
 2. In Layout, place the **3D print** tile from the library's Plugins group. 3x2 or larger shows the details and keys.
 3. In the inspector, choose the printer's **thumbnail camera** (`camera.<printer>_thumbnail`) as the tile's entity.
    On a screen without pictures choose any of the printer's sensors instead.
-4. Press **Fill from a device** and pick the printer. It fills the sensors, the Box slots and the keys'
+4. Press **Fill from a device** and pick the printer. It fills the sensors, the Box's sensors and the keys'
    buttons and camera, the ones the printer has. Check the camera under **Keys**: Moonraker names it after the webcam,
    so one with an unusual name is chosen by hand.
 5. The keys need the screen to be allowed to perform Home Assistant actions (ESPHome, the screen's **Configure**).

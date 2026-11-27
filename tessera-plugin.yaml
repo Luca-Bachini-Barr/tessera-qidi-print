@@ -1,7 +1,7 @@
 # QIDI print: how a print on a QIDI (or any Moonraker / Klipper) printer is coming along, on a tile and on a card: the
 # file, the thumbnail, the progress, the time left and when it is done, the layer, the filament in use and the
-# temperatures. The sensors come from the Moonraker integration and, for the filament, the QIDI Box integration. Every
-# name, label and hint is a key into translations/<language>.json, part "app".
+# temperatures, and on a QIDI Box its filaments, filament changes, warnings and drying. Every sensor comes from the
+# Moonraker integration. Every name, label and hint is a key into translations/<language>.json, part "app".
 id: qidi_print
 version: 0.3.0
 api: "0.27"
@@ -33,7 +33,7 @@ tiles:
     domains: [camera, sensor]
     pictures: 1
     example: tile_example
-    # The Moonraker device holds every sensor, the QIDI Box integration's too: one pick fills them.
+    # The Moonraker device holds every sensor, the Box's too: one pick fills them.
     from_device: true
     options:
       - { id: print_state, kind: entity, domains: [sensor], matches: [print_state, current_print_state], label: opt_print_state, hint: opt_print_state_hint }
@@ -48,13 +48,15 @@ tiles:
       - { id: bed, kind: entity, domains: [sensor], device_class: [temperature], matches: [bed_temperature], label: opt_bed, group: group_temps }
       - { id: chamber, kind: entity, domains: [sensor], device_class: [temperature], matches: [chamber_temperature], label: opt_chamber, group: group_temps }
       - { id: speed, kind: entity, domains: [sensor], matches: [print_speed], label: opt_speed, group: group_temps }
-      # The QIDI Box: a Box Slot N Filament sensor per slot (the Moonraker integration's, or the QIDI Box
-      # integration's: the same attributes). Left empty on a printer without a Box: the filament line then shows the
-      # metres used alone.
+      # The QIDI Box: Moonraker's Box Slot N Filament sensor per slot, and its Box Filament Change, Box Warnings and Box
+      # 1 Drying. Left empty on a printer without a Box: the filament line then shows the metres used alone.
       - { id: slot1, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_1_filament], label: opt_slot1, hint: opt_slot_hint, group: group_box }
       - { id: slot2, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_2_filament], label: opt_slot2, group: group_box }
       - { id: slot3, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_3_filament], label: opt_slot3, group: group_box }
       - { id: slot4, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_4_filament], label: opt_slot4, group: group_box }
+      - { id: change, kind: entity, domains: [sensor], attributes: [target_slot], matches: [box_filament_change], label: opt_change, hint: opt_change_hint, group: group_box }
+      - { id: warnings, kind: entity, domains: [sensor], matches: [box_warnings], label: opt_warnings, group: group_box }
+      - { id: drying, kind: entity, domains: [binary_sensor], matches: [box_1_drying], label: opt_drying, group: group_box }
       # The keys: the Moonraker buttons they press, and the camera the Camera key opens. A key whose entity is not
       # chosen, gone or unavailable is not shown: a printer without a camera has no Camera key.
       - { id: pause, kind: entity, domains: [button], matches: [pause_print], label: opt_pause, group: group_controls }

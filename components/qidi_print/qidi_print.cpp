@@ -31,6 +31,9 @@ static constexpr uint32_t ICON_SPEED = 0xF04C5;      // speedometer
 static constexpr uint32_t ICON_PLAY = 0xF040A;       // play
 static constexpr uint32_t ICON_STOP = 0xF04DB;       // stop
 static constexpr uint32_t ICON_CAMERA = 0xF07AE;     // cctv
+static constexpr uint32_t ICON_CHANGE = 0xF18F2;     // refresh-auto
+static constexpr uint32_t ICON_WARNING = 0xF002A;    // alert-outline
+static constexpr uint32_t ICON_DRYING = 0xF058E;     // water-percent
 static constexpr uint32_t STOP_CONFIRM_MS = 5000;    // Stop cancels only on a second tap within this
 
 static void copy(char *to, size_t size, const char *from) {
@@ -53,8 +56,8 @@ struct Slot {
   uint8_t r, g, b;
   bool shown, has_color, empty, active;
 };
-// The four slots of a QIDI Box, one sensor each (Box Slot N Filament, from the Moonraker integration or the QIDI Box
-// integration: both have the same attributes). More slots would not fit the tile's 2.6 KB of data.
+// The four slots of a QIDI Box, one Moonraker Box Slot N Filament sensor each. More slots would not fit the tile's
+// 2.6 KB of data.
 static constexpr int SLOTS = 4;
 static constexpr int SLOTS_PER_BOX = 4;
 static const char *const SLOT_KEYS[SLOTS] = {"slot1", "slot2", "slot3", "slot4"};
@@ -125,6 +128,12 @@ struct Print {
   int slots = 0;  // one more than the last slot shown, 0 without a Box
   // The keys' entities, there now: a printer without a camera, or a key's button gone, shows no key.
   bool has_pause = false, has_resume = false, has_cancel = false, has_camera = false;
+  // The Box's own sensors: the step of a filament change ("" when none runs), the slot it loads (0-based, -1 when
+  // not known), how many warnings the Box reports, and whether it dries its filament.
+  char change[16] = "";
+  int change_slot = -1;
+  int warnings = 0;
+  bool drying = false;
 
   bool running() const { return phase == Phase::PRINTING || phase == Phase::PAUSED; }
   // A layer worth showing: the file says how many there are, and the current one lies within them. Without a total
@@ -219,6 +228,17 @@ struct Print {
       slots = i + 1;
     }
 
+    // A filament change: Moonraker's Box Filament Change sensor, idle without one.
+    e = es["change"].as<JsonObjectConst>();
+    const char *c = e["state"] | "";
+    if (known(c) && strcmp(c, "idle") != 0) {
+      copy(change, sizeof(change), c);
+      const int target = e["attributes"]["target_slot"] | 0;
+      if (target >= 1 && target <= SLOTS) change_slot = target - 1;
+    }
+    if (number(es["warnings"].as<JsonObjectConst>(), v) && v > 0) warnings = static_cast<int>(lroundf(v));
+    drying = !strcmp(es["drying"]["state"] | "", "on");
+
     has_pause = present(es["pause"].as<JsonObjectConst>());
     has_resume = present(es["resume"].as<JsonObjectConst>());
     has_cancel = present(es["cancel"].as<JsonObjectConst>());
@@ -312,8 +332,15 @@ struct Row {
 };
 
 // What a row may say, in the order they get the room.
-enum class Detail : uint8_t { LAYER, ELAPSED, FILAMENT, NOZZLE, BED, CHAMBER, SPEED };
-static constexpr int DETAILS = 7;
+enum class Detail : uint8_t { WARNING, CHANGE, LAYER, ELAPSED, FILAMENT, DRYING, NOZZLE, BED, CHAMBER, SPEED };
+static constexpr int DETAILS = 10;
+
+// A slot as the printer's screen names it: 1A to 1D for the first Box.
+static std::string slot_name(int i) {
+  char b[4];
+  snprintf(b, sizeof(b), "%d%c", i / SLOTS_PER_BOX + 1, 'A' + i % SLOTS_PER_BOX);
+  return b;
+}
 
 // ---- The face: the same parts on the tile and the card, laid out by the room ----
 
@@ -732,6 +759,14 @@ class Face {
     const Print &p = print;
     const bool busy = p.running() || p.phase == Phase::COMPLETE;
     switch (d) {
+      case Detail::WARNING: {
+        if (!p.online() || p.warnings <= 0) return false;
+        row.paint(ICON_WARNING, p.warnings == 1 ? std::string(plugin_->text("box_warning"))
+                                                : tessera::fill(plugin_->text("box_warnings"), "n",
+                                                                std::to_string(p.warnings)));
+        ui::set_tone(row.icon, Tone::ALERT, theme::SLATE);
+        return true;
+      }
       case Detail::LAYER: {
         if (!busy || !p.layer_known()) return false;
         std::string t = tessera::fill(plugin_->text("layer"), "layer", std::to_string(p.layer));
@@ -746,6 +781,14 @@ class Face {
         row.paint(ICON_TIMER, tessera::fill(plugin_->text("elapsed"), "time", duration_text(plugin_, e)));
         return true;
       }
+      case Detail::CHANGE: {
+        // A filament change while it runs: its step and the slot it loads, with that spool's colour.
+        if (!p.change[0] || !p.online()) return false;
+        const int to = p.change_slot;
+        const Slot *spool = to >= 0 && to < p.slots && p.slot[to].shown ? &p.slot[to] : nullptr;
+        row.paint(ICON_CHANGE, change_text(p.change, to), spool);
+        return true;
+      }
       case Detail::FILAMENT: {
         // The spool that feeds the toolhead, and how much of it this print used.
         const int a = p.active();
@@ -758,6 +801,10 @@ class Face {
         row.paint(ICON_PRINTER, t, a >= 0 ? &p.slot[a] : nullptr);
         return true;
       }
+      case Detail::DRYING:
+        if (!p.online() || !p.drying) return false;
+        row.paint(ICON_DRYING, plugin_->text("box_drying"));
+        return true;
       case Detail::NOZZLE:
         if (!p.online() || !std::isfinite(p.nozzle)) return false;
         row.paint(ICON_NOZZLE, tessera::fill(plugin_->text("nozzle"), "t", degrees(p.nozzle)));
@@ -779,6 +826,23 @@ class Face {
       }
     }
     return false;
+  }
+
+  // "Loading 1D", "Unloading", "Purging 1D"...: the step's words, with the slot when the change names one. A step
+  // without words of its own says "Changing filament".
+  std::string change_text(const char *step, int to) const {
+    static const char *const STEPS[][2] = {
+        {"starting", "change_starting"}, {"cutting", "change_cutting"}, {"unloading", "change_unloading"},
+        {"loading", "change_loading"},   {"changing", "change_purging"}, {"eject", "change_ejecting"},
+        {"paused", "change_paused"},
+    };
+    const char *key = "change_other";
+    for (const auto &s : STEPS)
+      if (!strcmp(step, s[0])) key = s[1];
+    std::string t = plugin_->text(key);
+    if (to >= 0 && strcmp(key, "change_unloading") != 0 && strcmp(key, "change_paused") != 0)
+      t += " " + slot_name(to);
+    return t;
   }
 
   std::string left_text(float left) const {
