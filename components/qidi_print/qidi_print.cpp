@@ -132,6 +132,11 @@ struct Print {
   // not known), how many warnings the Box reports, and whether it dries its filament.
   char change[16] = "";
   int change_slot = -1;
+  // Kept from one reading to the next while a change runs: whether one of its steps (cutting, unloading, loading,
+  // eject) was seen, so "changing" after them is the purge and before them the start; and the slot it loads, which
+  // the sensor drops when the task ends, before the purge.
+  bool change_stepped = false;
+  int change_target = -1;
   int warnings = 0;
   bool drying = false;
 
@@ -161,6 +166,8 @@ struct Print {
   }
 
   void read(JsonObjectConst data) {
+    const bool stepped = change_stepped;
+    const int target_before = change_target;
     *this = Print{};
     const char *wait = data["wait"] | "";
     if (!strcmp(wait, "too_large")) {
@@ -234,7 +241,9 @@ struct Print {
     if (known(c) && strcmp(c, "idle") != 0) {
       copy(change, sizeof(change), c);
       const int target = e["attributes"]["target_slot"] | 0;
-      if (target >= 1 && target <= SLOTS) change_slot = target - 1;
+      change_target = target >= 1 && target <= SLOTS ? target - 1 : target_before;
+      change_slot = change_target;
+      change_stepped = stepped || (strcmp(c, "changing") != 0 && strcmp(c, "starting") != 0 && strcmp(c, "paused") != 0);
     }
     if (number(es["warnings"].as<JsonObjectConst>(), v) && v > 0) warnings = static_cast<int>(lroundf(v));
     drying = !strcmp(es["drying"]["state"] | "", "on");
@@ -786,7 +795,7 @@ class Face {
         if (!p.change[0] || !p.online()) return false;
         const int to = p.change_slot;
         const Slot *spool = to >= 0 && to < p.slots && p.slot[to].shown ? &p.slot[to] : nullptr;
-        row.paint(ICON_CHANGE, change_text(p.change, to), spool);
+        row.paint(ICON_CHANGE, change_text(p.change, to, p.change_stepped), spool);
         return true;
       }
       case Detail::FILAMENT: {
@@ -828,20 +837,26 @@ class Face {
     return false;
   }
 
-  // "Loading 1D", "Unloading", "Purging 1D"...: the step's words, with the slot when the change names one. A step
-  // without words of its own says "Changing filament".
-  std::string change_text(const char *step, int to) const {
-    static const char *const STEPS[][2] = {
-        {"starting", "change_starting"}, {"cutting", "change_cutting"}, {"unloading", "change_unloading"},
-        {"loading", "change_loading"},   {"changing", "change_purging"}, {"eject", "change_ejecting"},
-        {"paused", "change_paused"},
+  // "Cutting filament", "Loading 1D", "Purging 1D"...: the step's words, and the slot for the steps that work on it.
+  // "changing" is the purge once a step ran, and "Changing filament" before the task starts; a step without words
+  // of its own says "Changing filament" too.
+  std::string change_text(const char *step, int to, bool stepped) const {
+    struct Step { const char *step, *key; bool slot; };
+    static const Step STEPS[] = {
+        {"starting", "change_starting", false}, {"cutting", "change_cutting", false},
+        {"unloading", "change_unloading", false}, {"loading", "change_loading", true},
+        {"eject", "change_ejecting", true},       {"paused", "change_paused", false},
     };
     const char *key = "change_other";
-    for (const auto &s : STEPS)
-      if (!strcmp(step, s[0])) key = s[1];
+    bool slot = false;
+    if (!strcmp(step, "changing")) {
+      if (stepped) key = "change_purging", slot = true;
+    } else {
+      for (const auto &s : STEPS)
+        if (!strcmp(step, s.step)) key = s.key, slot = s.slot;
+    }
     std::string t = plugin_->text(key);
-    if (to >= 0 && strcmp(key, "change_unloading") != 0 && strcmp(key, "change_paused") != 0)
-      t += " " + slot_name(to);
+    if (slot && to >= 0) t += " " + slot_name(to);
     return t;
   }
 
