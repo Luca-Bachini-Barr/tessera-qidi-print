@@ -168,6 +168,8 @@ struct Print {
   void read(JsonObjectConst data) {
     const bool stepped = change_stepped;
     const int target_before = change_target;
+    Slot slots_before[SLOTS];
+    memcpy(slots_before, slot, sizeof(slot));
     *this = Print{};
     const char *wait = data["wait"] | "";
     if (!strcmp(wait, "too_large")) {
@@ -219,9 +221,16 @@ struct Print {
     number(es["chamber"].as<JsonObjectConst>(), chamber);
     number(es["speed"].as<JsonObjectConst>(), speed);
 
-    // The Box: a sensor per slot. One not chosen, or unavailable (the Box off), is not shown.
+    // The Box: a sensor per slot. One not chosen, or unavailable (the Box off), is not shown. One that came without
+    // its state (the add-on left it out of a full message, or it waits as too_large) keeps what it showed: the slots
+    // are the largest parts, the first to give way when the readings fill the tile's room.
     for (int i = 0; i < SLOTS; ++i) {
       JsonObjectConst se = es[SLOT_KEYS[i]].as<JsonObjectConst>();
+      if (!se.isNull() && !se["state"].is<const char *>()) {
+        slot[i] = slots_before[i];
+        if (slot[i].shown) slots = i + 1;
+        continue;
+      }
       const char *name = se["state"] | "";
       if (!known(name)) continue;
       Slot &sl = slot[i];
