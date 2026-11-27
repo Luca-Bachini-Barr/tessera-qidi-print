@@ -51,10 +51,19 @@ enum class Phase : uint8_t { CHOOSE, TOO_LARGE, OFF, STANDBY, PRINTING, PAUSED, 
 struct Slot {
   char type[24];
   uint8_t r, g, b;
-  bool chosen, has_color, active, empty;
+  bool has_color, empty;
 };
-static constexpr int SLOTS = 4;
-static const char *const SLOT_KEYS[SLOTS] = {"slot1", "slot2", "slot3", "slot4"};
+// Up to four QIDI Boxes of four slots each, from the QIDI Box integration's Box Filaments sensor.
+static constexpr int SLOTS = 16;
+static constexpr int SLOTS_PER_BOX = 4;
+
+// An entity the person chose that Home Assistant has now: there, and not unavailable. A button's state is the
+// moment it was last pressed, "unknown" before that, so unknown counts as there.
+static bool present(JsonObjectConst e) {
+  if (e.isNull()) return false;
+  const char *s = e["state"] | "";
+  return *s && strcmp(s, "unavailable") != 0;
+}
 
 // A sensor's number, false while it has none ("unavailable", "unknown").
 static bool number(JsonObjectConst e, float &out) {
@@ -111,6 +120,10 @@ struct Print {
   float filament = NAN;                  // metres
   float nozzle = NAN, bed = NAN, chamber = NAN, speed = NAN;
   Slot slot[SLOTS]{};
+  int slots = 0;         // how many the Box (or Boxes) have, 0 without a Box
+  int active_slot = -1;  // 0-based, the slot that feeds the toolhead
+  // The keys' entities, there now: a printer without a camera, or a key's button gone, shows no key.
+  bool has_pause = false, has_resume = false, has_cancel = false, has_camera = false;
 
   bool running() const { return phase == Phase::PRINTING || phase == Phase::PAUSED; }
   // A layer worth showing: the file says how many there are, and the current one lies within them. Without a total
@@ -118,16 +131,8 @@ struct Print {
   bool layer_known() const { return layers > 1 && layer >= 0 && layer <= layers; }
   bool online() const { return phase >= Phase::STANDBY; }
 
-  int active() const {
-    for (int i = 0; i < SLOTS; ++i)
-      if (slot[i].chosen && slot[i].active && !slot[i].empty) return i;
-    return -1;
-  }
-  bool any_slot() const {
-    for (const Slot &s : slot)
-      if (s.chosen) return true;
-    return false;
-  }
+  int active() const { return active_slot >= 0 && active_slot < slots && !slot[active_slot].empty ? active_slot : -1; }
+  bool any_slot() const { return slots > 0; }
 
   // The time left now: Moonraker's number counted down from when it came, while the print goes on.
   float left_now(uint32_t epoch) const {
@@ -193,20 +198,29 @@ struct Print {
     number(es["chamber"].as<JsonObjectConst>(), chamber);
     number(es["speed"].as<JsonObjectConst>(), speed);
 
-    for (int i = 0; i < SLOTS; ++i) {
-      JsonObjectConst se = es[SLOT_KEYS[i]].as<JsonObjectConst>();
-      Slot &sl = slot[i];
-      if (se.isNull()) continue;
-      const char *name = se["state"] | "";
-      if (!known(name)) continue;  // the Box is off: no slot to show
-      sl.chosen = true;
-      sl.empty = !strcmp(name, "Empty");
-      JsonObjectConst a = se["attributes"].as<JsonObjectConst>();
-      sl.active = a["active"] | false;
-      const char *type = a["filament_type"] | "";
-      copy(sl.type, sizeof(sl.type), *type ? type : name);
-      sl.has_color = !sl.empty && parse_color(a["color"] | "", sl.r, sl.g, sl.b);
+    // The Box: every slot in one entity, its lists in slot order. Off (unavailable) or not chosen: no slots.
+    JsonObjectConst box = es["box"].as<JsonObjectConst>();
+    if (known(box["state"] | "")) {
+      JsonObjectConst a = box["attributes"].as<JsonObjectConst>();
+      JsonArrayConst types = a["types"].as<JsonArrayConst>();
+      JsonArrayConst colors = a["colors"].as<JsonArrayConst>();
+      for (JsonVariantConst t : types) {
+        if (slots >= SLOTS) break;
+        Slot &sl = slot[slots];
+        const char *type = t | "";
+        copy(sl.type, sizeof(sl.type), type);
+        sl.empty = !strcmp(type, "Empty");
+        sl.has_color = !sl.empty && parse_color(colors[slots] | "", sl.r, sl.g, sl.b);
+        ++slots;
+      }
+      const int n = a["active_slot"] | 0;  // 1-based, null for none
+      active_slot = n > 0 ? n - 1 : -1;
     }
+
+    has_pause = present(es["pause"].as<JsonObjectConst>());
+    has_resume = present(es["resume"].as<JsonObjectConst>());
+    has_cancel = present(es["cancel"].as<JsonObjectConst>());
+    has_camera = present(es["camera"].as<JsonObjectConst>());
   }
 };
 
@@ -389,10 +403,15 @@ class Face {
     // The details, in two columns where they are wide enough, as many as fit; on the card the Box's slots at the
     // bottom of the room.
     int bottom = h;
-    if (card) {
-      box_h_ = std::max(ui::mm(9), ui::line_height(Font::BODY_LARGE) + ui::px(12));
+    // One row of four slots for each Box the printer has (the card opens with the tile's readings, so it knows);
+    // none without a Box.
+    const int boxes = (std::min(print.slots, SLOTS) + SLOTS_PER_BOX - 1) / SLOTS_PER_BOX;
+    if (card && boxes > 0) {
+      const int box_gap = ui::px(6);
+      const int row = std::max(boxes > 2 ? ui::mm(7) : ui::mm(9), ui::line_height(Font::BODY_LARGE) + ui::px(10));
+      box_h_ = boxes * row + (boxes - 1) * box_gap;
       bottom = h - box_h_ - gap;
-      make_box(parent, x0, h - box_h_, cw, box_h_);
+      make_box(parent, x0, h - box_h_, cw, row, box_gap, boxes * SLOTS_PER_BOX);
     }
     // The keys (Pause or Resume, Stop, Camera) above that, on the card and on a tall tile.
     const int key_h = std::max(ui::mm(11), ui::line_height(Font::BODY_LARGE) + ui::px(20));
@@ -576,9 +595,9 @@ class Face {
     if (!p.running() || strcmp(stop_file_, p.file) != 0) stop_armed_ = false;
     const bool paused = p.phase == Phase::PAUSED;
     const char *pause_entity = paused ? ctl.resume : ctl.pause;
-    key_[0].shown = p.running() && *pause_entity;
-    key_[1].shown = p.running() && *ctl.cancel;
-    key_[2].shown = *ctl.camera != '\0';
+    key_[0].shown = p.running() && *pause_entity && (paused ? p.has_resume : p.has_pause);
+    key_[1].shown = p.running() && *ctl.cancel && p.has_cancel;
+    key_[2].shown = *ctl.camera != '\0' && p.has_camera;
     // The shown keys share the row.
     int n = 0;
     for (const Key &k : key_) n += k.shown;
@@ -639,13 +658,14 @@ class Face {
     lv_obj_set_style_radius(fill_, bar_h_ / 2, 0);
   }
 
-  void make_box(lv_obj_t *parent, int x, int y, int w, int h) {
+  void make_box(lv_obj_t *parent, int x, int top, int w, int h, int row_gap, int cells) {
     const int gap = ui::px(8);
-    const int cell = (w - (SLOTS - 1) * gap) / SLOTS;
-    const int sw = std::min(h - ui::px(12), ui::mm(6));
+    const int cell = (w - (SLOTS_PER_BOX - 1) * gap) / SLOTS_PER_BOX;
+    const int sw = std::max(ui::px(8), std::min(h - ui::px(12), ui::mm(6)));
     const int lh = ui::line_height(Font::BODY_LARGE);
-    for (int i = 0; i < SLOTS; ++i) {
-      const int cx = x + i * (cell + gap);
+    for (int i = 0; i < cells && i < SLOTS; ++i) {
+      const int cx = x + (i % SLOTS_PER_BOX) * (cell + gap);
+      const int y = top + (i / SLOTS_PER_BOX) * (h + row_gap);
       box_cell_[i] = ui::block(parent, theme::CARD);
       lv_obj_set_size(box_cell_[i], cell, h);
       lv_obj_set_pos(box_cell_[i], cx, y);
@@ -671,7 +691,7 @@ class Face {
     for (int i = 0; i < SLOTS; ++i) {
       if (!box_cell_[i]) continue;
       const Slot &s = p.slot[i];
-      const bool on = s.chosen && p.online();
+      const bool on = i < p.slots && p.online();
       show(box_cell_[i], on);
       show(box_swatch_[i], on);
       show(box_words_[i], on);

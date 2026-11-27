@@ -58,11 +58,6 @@
     "opt_bed": "Bed temperature",
     "opt_chamber": "Chamber temperature",
     "opt_speed": "Print speed",
-    "opt_slot1": "Box slot 1",
-    "opt_slot2": "Box slot 2",
-    "opt_slot3": "Box slot 3",
-    "opt_slot4": "Box slot 4",
-    "opt_slot_hint": "The QIDI Box integration's slot sensors: the active slot is the filament in use.",
     "group_temps": "Temperatures and speed",
     "group_box": "QIDI Box",
     "card_camera": "Camera",
@@ -71,7 +66,9 @@
     "opt_cancel": "Cancel button",
     "opt_cancel_hint": "Stop asks for a second tap within 5 seconds before it cancels the print.",
     "opt_camera": "Printer camera",
-    "opt_camera_hint": "The camera the Camera key opens, full screen.",
-    "group_controls": "Keys"
+    "opt_camera_hint": "The camera the Camera key opens, full screen. Leave it empty on a printer without a camera.",
+    "group_controls": "Keys",
+    "opt_box": "Box filaments",
+    "opt_box_hint": "The QIDI Box integration's Box Filaments sensor: all slots of every Box. Leave it empty without a Box."
   }
 }
