@@ -3,8 +3,9 @@
 ## 0.3.0 - 2026-11-27
 - For every QIDI printer on Moonraker (Q1 Pro, Plus4, Q2, X-Max 3, X-Plus 3...), with or without a Box and a camera.
   Nothing is filled in for one printer any more: **Fill from a device** fills the sensors, the Box and the keys.
-- The Box comes from one entity, the QIDI Box integration's Box Filaments sensor (ha-qidi-box 0.2.0 or later), so up
-  to four Boxes (16 slots) show; the card has a row of four slots for each Box. The four slot options are gone.
+- The Box slots read the Box Slot N Filament sensors, from the Moonraker integration (proposed) or the QIDI Box
+  integration, which have the same attributes. Without a Box the Box row is not drawn; a Box switched on or off while
+  the card is open lays the card out again.
 - A key whose entity is not there or is unavailable does not show: no Camera key on a printer without a camera, and no
   Pause, Resume or Stop without the printer's buttons.
 

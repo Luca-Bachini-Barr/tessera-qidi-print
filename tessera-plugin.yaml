@@ -48,9 +48,13 @@ tiles:
       - { id: bed, kind: entity, domains: [sensor], device_class: [temperature], matches: [bed_temperature], label: opt_bed, group: group_temps }
       - { id: chamber, kind: entity, domains: [sensor], device_class: [temperature], matches: [chamber_temperature], label: opt_chamber, group: group_temps }
       - { id: speed, kind: entity, domains: [sensor], matches: [print_speed], label: opt_speed, group: group_temps }
-      # The QIDI Box integration's Box Filaments sensor: every slot of every Box in one entity. Left empty on a
-      # printer without a Box: the filament line then shows the metres used alone.
-      - { id: box, kind: entity, domains: [sensor], attributes: [active_slot, types, colors], matches: [box_filaments], label: opt_box, hint: opt_box_hint, group: group_box }
+      # The QIDI Box: a Box Slot N Filament sensor per slot (the Moonraker integration's, or the QIDI Box
+      # integration's: the same attributes). Left empty on a printer without a Box: the filament line then shows the
+      # metres used alone.
+      - { id: slot1, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_1_filament], label: opt_slot1, hint: opt_slot_hint, group: group_box }
+      - { id: slot2, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_2_filament], label: opt_slot2, group: group_box }
+      - { id: slot3, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_3_filament], label: opt_slot3, group: group_box }
+      - { id: slot4, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_4_filament], label: opt_slot4, group: group_box }
       # The keys: the Moonraker buttons they press, and the camera the Camera key opens. A key whose entity is not
       # chosen, gone or unavailable is not shown: a printer without a camera has no Camera key.
       - { id: pause, kind: entity, domains: [button], matches: [pause_print], label: opt_pause, group: group_controls }

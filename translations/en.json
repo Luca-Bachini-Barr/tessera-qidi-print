@@ -68,7 +68,10 @@
     "opt_camera": "Printer camera",
     "opt_camera_hint": "The camera the Camera key opens, full screen. Leave it empty on a printer without a camera.",
     "group_controls": "Keys",
-    "opt_box": "Box filaments",
-    "opt_box_hint": "The QIDI Box integration's Box Filaments sensor: all slots of every Box. Leave it empty without a Box."
+    "opt_slot1": "Box slot 1",
+    "opt_slot2": "Box slot 2",
+    "opt_slot3": "Box slot 3",
+    "opt_slot4": "Box slot 4",
+    "opt_slot_hint": "The Box Slot N Filament sensors: the slot marked active is the filament in use. Leave them empty without a Box."
   }
 }

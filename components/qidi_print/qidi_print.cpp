@@ -51,11 +51,13 @@ enum class Phase : uint8_t { CHOOSE, TOO_LARGE, OFF, STANDBY, PRINTING, PAUSED, 
 struct Slot {
   char type[24];
   uint8_t r, g, b;
-  bool has_color, empty;
+  bool shown, has_color, empty, active;
 };
-// Up to four QIDI Boxes of four slots each, from the QIDI Box integration's Box Filaments sensor.
-static constexpr int SLOTS = 16;
+// The four slots of a QIDI Box, one sensor each (Box Slot N Filament, from the Moonraker integration or the QIDI Box
+// integration: both have the same attributes). More slots would not fit the tile's 2.6 KB of data.
+static constexpr int SLOTS = 4;
 static constexpr int SLOTS_PER_BOX = 4;
+static const char *const SLOT_KEYS[SLOTS] = {"slot1", "slot2", "slot3", "slot4"};
 
 // An entity the person chose that Home Assistant has now: there, and not unavailable. A button's state is the
 // moment it was last pressed, "unknown" before that, so unknown counts as there.
@@ -120,8 +122,7 @@ struct Print {
   float filament = NAN;                  // metres
   float nozzle = NAN, bed = NAN, chamber = NAN, speed = NAN;
   Slot slot[SLOTS]{};
-  int slots = 0;         // how many the Box (or Boxes) have, 0 without a Box
-  int active_slot = -1;  // 0-based, the slot that feeds the toolhead
+  int slots = 0;  // one more than the last slot shown, 0 without a Box
   // The keys' entities, there now: a printer without a camera, or a key's button gone, shows no key.
   bool has_pause = false, has_resume = false, has_cancel = false, has_camera = false;
 
@@ -131,7 +132,11 @@ struct Print {
   bool layer_known() const { return layers > 1 && layer >= 0 && layer <= layers; }
   bool online() const { return phase >= Phase::STANDBY; }
 
-  int active() const { return active_slot >= 0 && active_slot < slots && !slot[active_slot].empty ? active_slot : -1; }
+  int active() const {
+    for (int i = 0; i < slots; ++i)
+      if (slot[i].shown && slot[i].active && !slot[i].empty) return i;
+    return -1;
+  }
   bool any_slot() const { return slots > 0; }
 
   // The time left now: Moonraker's number counted down from when it came, while the print goes on.
@@ -198,23 +203,20 @@ struct Print {
     number(es["chamber"].as<JsonObjectConst>(), chamber);
     number(es["speed"].as<JsonObjectConst>(), speed);
 
-    // The Box: every slot in one entity, its lists in slot order. Off (unavailable) or not chosen: no slots.
-    JsonObjectConst box = es["box"].as<JsonObjectConst>();
-    if (known(box["state"] | "")) {
-      JsonObjectConst a = box["attributes"].as<JsonObjectConst>();
-      JsonArrayConst types = a["types"].as<JsonArrayConst>();
-      JsonArrayConst colors = a["colors"].as<JsonArrayConst>();
-      for (JsonVariantConst t : types) {
-        if (slots >= SLOTS) break;
-        Slot &sl = slot[slots];
-        const char *type = t | "";
-        copy(sl.type, sizeof(sl.type), type);
-        sl.empty = !strcmp(type, "Empty");
-        sl.has_color = !sl.empty && parse_color(colors[slots] | "", sl.r, sl.g, sl.b);
-        ++slots;
-      }
-      const int n = a["active_slot"] | 0;  // 1-based, null for none
-      active_slot = n > 0 ? n - 1 : -1;
+    // The Box: a sensor per slot. One not chosen, or unavailable (the Box off), is not shown.
+    for (int i = 0; i < SLOTS; ++i) {
+      JsonObjectConst se = es[SLOT_KEYS[i]].as<JsonObjectConst>();
+      const char *name = se["state"] | "";
+      if (!known(name)) continue;
+      Slot &sl = slot[i];
+      sl.shown = true;
+      sl.empty = !strcmp(name, "Empty");
+      JsonObjectConst a = se["attributes"].as<JsonObjectConst>();
+      sl.active = a["active"] | false;
+      const char *type = a["filament_type"] | "";
+      copy(sl.type, sizeof(sl.type), *type ? type : name);
+      sl.has_color = !sl.empty && parse_color(a["color"] | "", sl.r, sl.g, sl.b);
+      slots = i + 1;
     }
 
     has_pause = present(es["pause"].as<JsonObjectConst>());
@@ -712,7 +714,7 @@ class Face {
     for (int i = 0; i < SLOTS; ++i) {
       if (!box_cell_[i]) continue;
       const Slot &s = p.slot[i];
-      const bool on = i < p.slots && p.online();
+      const bool on = i < p.slots && s.shown && p.online();
       show(box_cell_[i], on);
       show(box_swatch_[i], on);
       show(box_words_[i], on);
