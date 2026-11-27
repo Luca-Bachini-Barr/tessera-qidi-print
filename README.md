@@ -11,6 +11,9 @@ Assistant's Moonraker integration knows, and reads the filament from the QIDI Bo
   tile turns yellow while the print is paused and red when it failed.
 - **The card**: tap the tile. All of it at the size of the screen, the thumbnail large, and the four QIDI Box slots at
   the bottom with the slot in use outlined. Tap the card to close it.
+- **The keys**: Pause (Resume while paused) and Stop while a print runs, and Camera at any time. Stop turns red and
+  asks for a second tap within 5 seconds before it cancels the print. Camera opens the printer's camera over the whole
+  screen; tap it to close. The keys show on the card, and on the tile when it is tall enough (a whole page does).
 - When nothing is printing it says Ready, Print finished (and how long it took), Print cancelled or Printer off, with
   the temperatures while the printer is on.
 
@@ -21,7 +24,9 @@ Assistant's Moonraker integration knows, and reads the filament from the QIDI Bo
 3. In the inspector, choose the printer's **thumbnail camera** (`camera.<printer>_thumbnail`) as the tile's entity.
    On a screen without pictures choose any of the printer's sensors instead.
 4. The sensors start filled in for a printer called Q2 (`sensor.q2_*`). For another name, use **Fill from a device**
-   and pick the Moonraker printer; the QIDI Box slots are under the **QIDI Box** group.
+   and pick the Moonraker printer; the QIDI Box slots are under the **QIDI Box** group, and the buttons and the
+   camera under **Keys**.
+5. The keys need the screen to be allowed to perform Home Assistant actions (ESPHome, the screen's **Configure**).
 
 ## Good to know
 

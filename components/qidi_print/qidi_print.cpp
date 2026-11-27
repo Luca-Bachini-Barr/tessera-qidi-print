@@ -1,4 +1,5 @@
 #include "qidi_print.h"
+#include "esphome/core/hal.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -27,6 +28,10 @@ static constexpr uint32_t ICON_NOZZLE = 0xF0238;     // fire
 static constexpr uint32_t ICON_BED = 0xF0438;        // radiator
 static constexpr uint32_t ICON_CHAMBER = 0xF050F;    // thermometer
 static constexpr uint32_t ICON_SPEED = 0xF04C5;      // speedometer
+static constexpr uint32_t ICON_PLAY = 0xF040A;       // play
+static constexpr uint32_t ICON_STOP = 0xF04DB;       // stop
+static constexpr uint32_t ICON_CAMERA = 0xF07AE;     // cctv
+static constexpr uint32_t STOP_CONFIRM_MS = 5000;    // Stop cancels only on a second tap within this
 
 static void copy(char *to, size_t size, const char *from) {
   strncpy(to, from ? from : "", size - 1);
@@ -202,6 +207,18 @@ struct Print {
   }
 };
 
+// The entities the keys use, from the tile's options (the card gets them from the tile that opened it).
+struct Controls {
+  char pause[96] = "", resume[96] = "", cancel[96] = "", camera[96] = "";
+
+  void read(JsonObjectConst options) {
+    copy(pause, sizeof(pause), options["pause"] | "");
+    copy(resume, sizeof(resume), options["resume"] | "");
+    copy(cancel, sizeof(cancel), options["cancel"] | "");
+    copy(camera, sizeof(camera), options["camera"] | "");
+  }
+};
+
 // ---- Words ----
 
 static std::string duration_text(const tessera::Plugin *p, float s) {
@@ -374,6 +391,13 @@ class Face {
       bottom = h - box_h_ - gap;
       make_box(parent, x0, h - box_h_, cw, box_h_);
     }
+    // The keys (Pause or Resume, Stop, Camera) above that, on the card and on a tall tile.
+    const int key_h = std::max(ui::mm(11), ui::line_height(Font::BODY_LARGE) + ui::px(20));
+    if (card || bottom - y >= key_h * 3) {
+      bottom -= key_h;
+      make_keys(parent, bottom, key_h);
+      bottom -= gap;
+    }
     const int row_h = std::max(ui::line_height(Font::BODY_LARGE), ih) + ui::px(card ? 12 : 6);
     const int cols = cw >= ui::mm(card ? 90 : 75) ? 2 : 1;
     const int col_w = (cw - (cols - 1) * gap) / cols;
@@ -383,6 +407,34 @@ class Face {
   }
 
   bool shows_picture() const { return pic_ != nullptr; }
+
+  Controls ctl;
+
+  // A tap at x, y: true when it was on one of the keys (and the key did its work).
+  bool press(int x, int y, int tile) {
+    const int k = key_at(x, y);
+    if (k < 0) return false;
+    const Print &p = print;
+    switch (static_cast<KeyId>(k)) {
+      case KeyId::PAUSE:
+        tessera::action("button.press", p.phase == Phase::PAUSED ? ctl.resume : ctl.pause);
+        break;
+      case KeyId::STOP:
+        if (stop_armed_ && millis() - stop_armed_at_ < STOP_CONFIRM_MS) {
+          tessera::action("button.press", ctl.cancel);
+          stop_armed_ = false;
+        } else {
+          stop_armed_ = true;
+          stop_armed_at_ = millis();
+        }
+        break;
+      case KeyId::CAMERA:
+        tessera::open_card(plugin_->plugin_id(), "camera", ctl.camera, tile, plugin_->text("camera"));
+        return true;
+    }
+    paint(tessera::epoch());
+    return true;
+  }
 
   void on_picture(lv_obj_t *place, tessera::PictureState state) {
     if (place == pic_) {
@@ -483,9 +535,93 @@ class Face {
     for (; r < rows_; ++r) row_[r].hide();
 
     if (card_) paint_box();
+    paint_keys();
   }
 
  private:
+  enum class KeyId : uint8_t { PAUSE, STOP, CAMERA };
+  static constexpr int KEYS = 3;
+  struct Key {
+    lv_obj_t *block{}, *icon{}, *words{};
+    int x = 0, w = 0;
+    bool shown = false;
+  };
+
+  void make_keys(lv_obj_t *parent, int y, int h) {
+    keys_y_ = y;
+    keys_h_ = h;
+    for (Key &k : key_) {
+      k.block = ui::block(parent, theme::RAISED);
+      lv_obj_set_size(k.block, 1, h);
+      lv_obj_set_pos(k.block, x0_, y);
+      k.icon = ui::label(k.block, Font::ICON_SMALL, theme::INK);
+      lv_obj_set_size(k.icon, ui::line_height(Font::ICON_SMALL) + ui::px(2), ui::line_height(Font::ICON_SMALL));
+      k.words = ui::label(k.block, Font::BODY_LARGE, theme::INK);
+      lv_obj_set_size(k.words, 1, ui::line_height(Font::BODY_LARGE));
+      show(k.block, false);
+    }
+    has_keys_ = true;
+  }
+
+  void paint_keys() {
+    if (!has_keys_) return;
+    const Print &p = print;
+    if (stop_armed_ && millis() - stop_armed_at_ >= STOP_CONFIRM_MS) stop_armed_ = false;
+    if (!p.running()) stop_armed_ = false;
+    const bool paused = p.phase == Phase::PAUSED;
+    const char *pause_entity = paused ? ctl.resume : ctl.pause;
+    key_[0].shown = p.running() && *pause_entity;
+    key_[1].shown = p.running() && *ctl.cancel;
+    key_[2].shown = *ctl.camera != '\0';
+    // The shown keys share the row.
+    int n = 0;
+    for (const Key &k : key_) n += k.shown;
+    const int gap = ui::px(8);
+    const int kw = n ? (cw_ - (n - 1) * gap) / n : 0;
+    int at = x0_;
+    for (int i = 0; i < KEYS; ++i) {
+      Key &k = key_[i];
+      show(k.block, k.shown);
+      if (!k.shown) continue;
+      k.x = at;
+      k.w = kw;
+      at += kw + gap;
+      uint32_t glyph = ICON_CAMERA;
+      std::string words = plugin_->text("camera");
+      bool alert = false;
+      if (i == 0) {
+        glyph = paused ? ICON_PLAY : ICON_PAUSE;
+        words = plugin_->text(paused ? "resume" : "pause");
+      } else if (i == 1) {
+        glyph = ICON_STOP;
+        alert = stop_armed_;
+        words = plugin_->text(stop_armed_ ? "stop_confirm" : "stop");
+      }
+      lv_obj_set_pos(k.block, k.x, keys_y_);
+      lv_obj_set_width(k.block, kw);
+      ui::set_fill(k.block, alert ? Tone::ALERT : Tone::NORMAL, theme::RAISED);
+      // The icon and the words together in the middle of the key.
+      const int iw = ui::line_height(Font::ICON_SMALL) + ui::px(2), pad = ui::px(10);
+      const int ww = std::min(ui::text_width(words, Font::BODY_LARGE) + ui::px(4), std::max(1, kw - iw - 3 * pad));
+      const int left = std::max(pad, (kw - iw - pad - ww) / 2);
+      lv_obj_set_pos(k.icon, left, (keys_h_ - ui::line_height(Font::ICON_SMALL)) / 2);
+      lv_obj_set_pos(k.words, left + iw + pad, (keys_h_ - ui::line_height(Font::BODY_LARGE)) / 2);
+      lv_obj_set_width(k.words, ww);
+      ui::set_text(k.icon, ui::icon(glyph));
+      ui::set_text(k.words, words);
+      const bool stop = i == 1;
+      ui::set_tone(k.icon, alert ? Tone::NORMAL : stop ? Tone::ALERT : Tone::NORMAL, alert ? theme::ON_ACCENT : theme::INK);
+      ui::set_color(k.words, alert ? theme::ON_ACCENT : theme::INK);
+    }
+  }
+
+  int key_at(int x, int y) const {
+    if (!has_keys_ || y < keys_y_ - ui::px(4) || y > keys_y_ + keys_h_ + ui::px(4)) return -1;
+    for (int i = 0; i < KEYS; ++i)
+      if (key_[i].shown && x >= key_[i].x - ui::px(4) && x <= key_[i].x + key_[i].w + ui::px(4)) return i;
+    return -1;
+  }
+
   void make_bar(lv_obj_t *parent) {
     track_ = ui::block(parent, theme::TRACK);
     lv_obj_set_size(track_, cw_, bar_h_);
@@ -618,11 +754,16 @@ class Face {
   int w_ = 0, x0_ = 0, cw_ = 1, bar_y_ = 0, bar_h_ = 1, pct_w_ = 0, box_h_ = 0, rows_ = 0;
   lv_obj_t *pic_{}, *pic_icon_{}, *title_{}, *state_icon_{}, *state_{}, *pct_{}, *left_{}, *eta_{}, *track_{}, *fill_{};
   Row row_[DETAILS];
+  Key key_[KEYS];
+  bool has_keys_ = false, stop_armed_ = false;
+  int keys_y_ = 0, keys_h_ = 0;
+  uint32_t stop_armed_at_ = 0;
   lv_obj_t *box_cell_[SLOTS]{}, *box_swatch_[SLOTS]{}, *box_words_[SLOTS]{};
 };
 
 // What the card shows when it opens: the readings of the tile that opened it (a card's context has none of its own).
 static Print opened_print;
+static Controls opened_controls;
 
 // ---- The tile ----
 
@@ -633,6 +774,7 @@ class PrintTile : public tessera::Tile {
   void create(const tessera::TileContext &c) override {
     tile_ = c.tile;
     copy(entity_, sizeof(entity_), c.entity);
+    face_.ctl.read(c.options);
     face_.build(c.parent, c.width, c.height, false, entity_);
   }
 
@@ -643,7 +785,10 @@ class PrintTile : public tessera::Tile {
 
   void on_tap() override {
     if (face_.print.phase == Phase::CHOOSE) return;
+    const tessera::Point at = tessera::tap_point();
+    if (face_.press(at.x, at.y, tile_)) return;
     opened_print = face_.print;
+    opened_controls = face_.ctl;
     tessera::open_card(plugin_->plugin_id(), "detail", entity_, tile_);
   }
 
@@ -661,7 +806,9 @@ class DetailCard : public tessera::Card {
   explicit DetailCard(QidiPrint *plugin) : face_(plugin) {}
 
   void open(const tessera::CardContext &c) override {
+    tile_ = c.tile;
     face_.print = opened_print;
+    face_.ctl = opened_controls;
     face_.build(c.parent, c.width, c.height, true, c.entity ? c.entity : "");
     face_.paint(tessera::epoch());
   }
@@ -674,10 +821,50 @@ class DetailCard : public tessera::Card {
   void on_tick(uint32_t epoch) override { face_.paint(epoch); }
   void on_theme() override { face_.paint(tessera::epoch()); }
   void on_picture(lv_obj_t *place, tessera::PictureState state) override { face_.on_picture(place, state); }
-  void on_tap() override { tessera::close_card(); }
+  void on_tap() override {
+    const tessera::Point at = tessera::tap_point();
+    if (!face_.press(at.x, at.y, tile_)) tessera::close_card();
+  }
 
  private:
   Face face_;
+  int tile_ = -1;
+};
+
+// ---- The camera: the printer's camera over the whole room, a tap closes it ----
+
+class CameraCard : public tessera::Card {
+ public:
+  explicit CameraCard(QidiPrint *plugin) : plugin_(plugin) {}
+
+  void open(const tessera::CardContext &c) override {
+    const std::string entity = c.entity ? c.entity : "";
+    note_ = ui::label(c.parent, Font::BODY_LARGE, theme::MUTED);
+    lv_obj_set_size(note_, c.width, ui::line_height(Font::BODY_LARGE));
+    lv_obj_set_pos(note_, 0, (c.height - ui::line_height(Font::BODY_LARGE)) / 2);
+    lv_obj_set_style_text_align(note_, LV_TEXT_ALIGN_CENTER, 0);
+    show(note_, false);
+    if (!ui::pictures() || entity.rfind("camera.", 0) != 0) {
+      ui::set_text(note_, plugin_->text("no_camera"));
+      show(note_, true);
+      return;
+    }
+    place_ = ui::picture(c.parent);
+    lv_obj_set_size(place_, c.width, c.height);
+    lv_obj_set_pos(place_, 0, 0);
+    ui::set_picture(place_, "camera:" + entity, tessera::Fit::CONTAIN);
+  }
+  void on_picture(lv_obj_t *place, tessera::PictureState state) override {
+    if (place != place_) return;
+    ui::set_text(note_, plugin_->text("no_camera"));
+    show(note_, state != tessera::PictureState::SHOWN);
+  }
+  void on_theme() override { ui::set_color(note_, theme::MUTED); }
+  void on_tap() override { tessera::close_card(); }
+
+ private:
+  QidiPrint *plugin_;
+  lv_obj_t *place_{}, *note_{};
 };
 
 // ---- The plugin ----
@@ -685,6 +872,7 @@ class DetailCard : public tessera::Card {
 void QidiPrint::setup() {
   add_tile("print", [this]() { return new PrintTile(this); });
   add_card("detail", [this]() { return new DetailCard(this); }, true);
+  add_card("camera", [this]() { return new CameraCard(this); }, true);
 }
 
 }  // namespace esphome::qidi_print
