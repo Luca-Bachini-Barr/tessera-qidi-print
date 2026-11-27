@@ -423,12 +423,15 @@ class Face {
         tessera::action("button.press", p.phase == Phase::PAUSED ? ctl.resume : ctl.pause);
         break;
       case KeyId::STOP:
-        if (stop_armed_ && millis() - stop_armed_at_ < STOP_CONFIRM_MS) {
+        // The second tap cancels only the print the first tap was for: the same file, still running.
+        if (stop_armed_ && millis() - stop_armed_at_ < STOP_CONFIRM_MS && p.running() &&
+            strcmp(stop_file_, p.file) == 0) {
           tessera::action("button.press", ctl.cancel);
           stop_armed_ = false;
-        } else {
+        } else if (p.running()) {
           stop_armed_ = true;
           stop_armed_at_ = millis();
+          copy(stop_file_, sizeof(stop_file_), p.file);
         }
         break;
       case KeyId::CAMERA:
@@ -570,7 +573,7 @@ class Face {
     if (!has_keys_) return;
     const Print &p = print;
     if (stop_armed_ && millis() - stop_armed_at_ >= STOP_CONFIRM_MS) stop_armed_ = false;
-    if (!p.running()) stop_armed_ = false;
+    if (!p.running() || strcmp(stop_file_, p.file) != 0) stop_armed_ = false;
     const bool paused = p.phase == Phase::PAUSED;
     const char *pause_entity = paused ? ctl.resume : ctl.pause;
     key_[0].shown = p.running() && *pause_entity;
@@ -761,6 +764,7 @@ class Face {
   bool has_keys_ = false, stop_armed_ = false;
   int keys_y_ = 0, keys_h_ = 0;
   uint32_t stop_armed_at_ = 0;
+  char stop_file_[64] = "";
   lv_obj_t *box_cell_[SLOTS]{}, *box_swatch_[SLOTS]{}, *box_words_[SLOTS]{};
 };
 
@@ -787,9 +791,9 @@ class PrintTile : public tessera::Tile {
   void on_picture(lv_obj_t *place, tessera::PictureState state) override { face_.on_picture(place, state); }
 
   void on_tap() override {
-    if (face_.print.phase == Phase::CHOOSE) return;
     const tessera::Point at = tessera::tap_point();
     if (face_.press(at.x, at.y, tile_)) return;
+    if (face_.print.phase == Phase::CHOOSE) return;
     opened_print = face_.print;
     opened_controls = face_.ctl;
     tessera::open_card(plugin_->plugin_id(), "detail", entity_, tile_);
