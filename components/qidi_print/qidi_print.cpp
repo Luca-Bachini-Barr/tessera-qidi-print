@@ -405,7 +405,8 @@ class Face {
     int bottom = h;
     // One row of four slots for each Box the printer has (the card opens with the tile's readings, so it knows);
     // none without a Box.
-    const int boxes = (std::min(print.slots, SLOTS) + SLOTS_PER_BOX - 1) / SLOTS_PER_BOX;
+    const int boxes = rows_for(print.slots);
+    box_rows_ = card ? boxes : 0;
     if (card && boxes > 0) {
       const int box_gap = ui::px(6);
       const int row = std::max(boxes > 2 ? ui::mm(7) : ui::mm(9), ui::line_height(Font::BODY_LARGE) + ui::px(10));
@@ -429,6 +430,9 @@ class Face {
   }
 
   bool shows_picture() const { return pic_ != nullptr; }
+  // The Box rows the card was laid out for, and how many the readings need now.
+  int box_rows() const { return box_rows_; }
+  static int rows_for(int slots) { return (std::min(slots, SLOTS) + SLOTS_PER_BOX - 1) / SLOTS_PER_BOX; }
 
   Controls ctl;
 
@@ -437,6 +441,12 @@ class Face {
     const int k = key_at(x, y);
     if (k < 0) return false;
     const Print &p = print;
+    // What the key does is checked again against the readings now: one that changed since the last paint (the
+    // button gone, the print over) does nothing but paint the keys again.
+    if (!key_ok(static_cast<KeyId>(k))) {
+      paint(tessera::epoch());
+      return true;
+    }
     switch (static_cast<KeyId>(k)) {
       case KeyId::PAUSE:
         tessera::action("button.press", p.phase == Phase::PAUSED ? ctl.resume : ctl.pause);
@@ -594,10 +604,7 @@ class Face {
     if (stop_armed_ && millis() - stop_armed_at_ >= STOP_CONFIRM_MS) stop_armed_ = false;
     if (!p.running() || strcmp(stop_file_, p.file) != 0) stop_armed_ = false;
     const bool paused = p.phase == Phase::PAUSED;
-    const char *pause_entity = paused ? ctl.resume : ctl.pause;
-    key_[0].shown = p.running() && *pause_entity && (paused ? p.has_resume : p.has_pause);
-    key_[1].shown = p.running() && *ctl.cancel && p.has_cancel;
-    key_[2].shown = *ctl.camera != '\0' && p.has_camera;
+    for (int i = 0; i < KEYS; ++i) key_[i].shown = key_ok(static_cast<KeyId>(i));
     // The shown keys share the row.
     int n = 0;
     for (const Key &k : key_) n += k.shown;
@@ -638,6 +645,20 @@ class Face {
       ui::set_tone(k.icon, alert ? Tone::NORMAL : stop ? Tone::ALERT : Tone::NORMAL, alert ? theme::ON_ACCENT : theme::INK);
       ui::set_color(k.words, alert ? theme::ON_ACCENT : theme::INK);
     }
+  }
+
+  // Whether a key has something to do now: its entity chosen and there, and for Pause, Resume and Stop a print.
+  bool key_ok(KeyId k) const {
+    const Print &p = print;
+    switch (k) {
+      case KeyId::PAUSE:
+        return p.running() && (p.phase == Phase::PAUSED ? *ctl.resume && p.has_resume : *ctl.pause && p.has_pause);
+      case KeyId::STOP:
+        return p.running() && *ctl.cancel && p.has_cancel;
+      case KeyId::CAMERA:
+        return *ctl.camera && p.has_camera;
+    }
+    return false;
   }
 
   int key_at(int x, int y) const {
@@ -782,6 +803,7 @@ class Face {
   Row row_[DETAILS];
   Key key_[KEYS];
   bool has_keys_ = false, stop_armed_ = false;
+  int box_rows_ = 0;
   int keys_y_ = 0, keys_h_ = 0;
   uint32_t stop_armed_at_ = 0;
   char stop_file_[64] = "";
@@ -830,10 +852,11 @@ class PrintTile : public tessera::Tile {
 
 class DetailCard : public tessera::Card {
  public:
-  explicit DetailCard(QidiPrint *plugin) : face_(plugin) {}
+  explicit DetailCard(QidiPrint *plugin) : plugin_(plugin), face_(plugin) {}
 
   void open(const tessera::CardContext &c) override {
     tile_ = c.tile;
+    copy(entity_, sizeof(entity_), c.entity);
     face_.print = opened_print;
     face_.ctl = opened_controls;
     face_.build(c.parent, c.width, c.height, true, c.entity ? c.entity : "");
@@ -843,6 +866,14 @@ class DetailCard : public tessera::Card {
     // A tile of Tessera's own sends {"state", "name"}: only a plugin tile's data has the sensors.
     if (data["entities"].isNull() && data["wait"].isNull()) return;
     face_.print.read(data);
+    // A Box more or less than the card was laid out for (one switched on or off): open the card again, so its rows
+    // of slots fit. The card leaves the glass at once and gets no call after this one.
+    if (Face::rows_for(face_.print.slots) != face_.box_rows()) {
+      opened_print = face_.print;
+      opened_controls = face_.ctl;
+      tessera::open_card(plugin_->plugin_id(), "detail", entity_, tile_);
+      return;
+    }
     face_.paint(tessera::epoch());
   }
   void on_tick(uint32_t epoch) override { face_.paint(epoch); }
@@ -854,8 +885,10 @@ class DetailCard : public tessera::Card {
   }
 
  private:
+  QidiPrint *plugin_;
   Face face_;
   int tile_ = -1;
+  char entity_[96] = "";
 };
 
 // ---- The camera: the printer's camera over the whole room, a tap closes it ----
