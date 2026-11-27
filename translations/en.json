@@ -21,7 +21,6 @@
     "took": "Took {time}",
     "elapsed": "Printing for {time}",
     "layer": "Layer {layer} of {layers}",
-    "layer_only": "Layer {layer}",
     "layer_short": "L {layer}/{layers}",
     "hours_minutes": "{h} h {m} min",
     "minutes": "{m} min",

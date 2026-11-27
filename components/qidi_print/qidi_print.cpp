@@ -113,6 +113,9 @@ struct Print {
   Slot slot[SLOTS]{};
 
   bool running() const { return phase == Phase::PRINTING || phase == Phase::PAUSED; }
+  // A layer worth showing: the file says how many there are, and the current one lies within them. Without a total
+  // Moonraker guesses the layer from the nozzle's height, which jumps while the printer probes, wipes and parks.
+  bool layer_known() const { return layers > 1 && layer >= 0 && layer <= layers; }
   bool online() const { return phase >= Phase::STANDBY; }
 
   int active() const {
@@ -488,7 +491,7 @@ class Face {
     if (compact_ && p.running()) {
       if (!pct.empty()) line = pct;
       if (std::isfinite(left)) line += " · " + left_text(left);
-      if (p.layer >= 0 && p.layers > 0 && w_ >= ui::mm(50)) line += " · " + layer_short(p);
+      if (p.layer_known() && w_ >= ui::mm(50)) line += " · " + layer_short(p);
     } else if (compact_ && finished && std::isfinite(p.elapsed)) {
       line += " · " + duration_text(plugin_, p.elapsed);
     }
@@ -684,9 +687,9 @@ class Face {
     const bool busy = p.running() || p.phase == Phase::COMPLETE;
     switch (d) {
       case Detail::LAYER: {
-        if (!busy || p.layer < 0) return false;
-        std::string t = tessera::fill(plugin_->text(p.layers > 0 ? "layer" : "layer_only"), "layer", std::to_string(p.layer));
-        if (p.layers > 0) t = tessera::fill(t.c_str(), "layers", std::to_string(p.layers));
+        if (!busy || !p.layer_known()) return false;
+        std::string t = tessera::fill(plugin_->text("layer"), "layer", std::to_string(p.layer));
+        t = tessera::fill(t.c_str(), "layers", std::to_string(p.layers));
         row.paint(ICON_LAYERS, t);
         return true;
       }

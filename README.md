@@ -30,6 +30,9 @@ Assistant's Moonraker integration knows, and reads the filament from the QIDI Bo
 
 ## Good to know
 
+- The layer shows only when the print file says how many layers it has. QIDI Studio writes that when its Machine
+  G-code has `SET_PRINT_STATS_INFO TOTAL_LAYER=[total_layer_count]` (start) and
+  `SET_PRINT_STATS_INFO CURRENT_LAYER={layer_num + 1}` (layer change).
 - The time left counts down on the screen every second between Home Assistant's updates.
 - The finish time comes from Moonraker's time left, so it settles after the first few minutes of a print.
 - The spool's colour on the screen is the colour the QIDI Box reports for that slot.
