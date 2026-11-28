@@ -31,6 +31,9 @@ static constexpr uint32_t ICON_SPEED = 0xF04C5;      // speedometer
 static constexpr uint32_t ICON_PLAY = 0xF040A;       // play
 static constexpr uint32_t ICON_STOP = 0xF04DB;       // stop
 static constexpr uint32_t ICON_CAMERA = 0xF07AE;     // cctv
+static constexpr uint32_t ICON_CHANGE = 0xF18F2;     // refresh-auto
+static constexpr uint32_t ICON_WARNING = 0xF002A;    // alert-outline
+static constexpr uint32_t ICON_DRYING = 0xF058E;     // water-percent
 static constexpr uint32_t STOP_CONFIRM_MS = 5000;    // Stop cancels only on a second tap within this
 
 static void copy(char *to, size_t size, const char *from) {
@@ -51,10 +54,21 @@ enum class Phase : uint8_t { CHOOSE, TOO_LARGE, OFF, STANDBY, PRINTING, PAUSED, 
 struct Slot {
   char type[24];
   uint8_t r, g, b;
-  bool chosen, has_color, active, empty;
+  bool shown, has_color, empty, active;
 };
+// The four slots of a QIDI Box, one Moonraker Box Slot N Filament sensor each. More slots would not fit the tile's
+// 2.6 KB of data.
 static constexpr int SLOTS = 4;
+static constexpr int SLOTS_PER_BOX = 4;
 static const char *const SLOT_KEYS[SLOTS] = {"slot1", "slot2", "slot3", "slot4"};
+
+// An entity the person chose that Home Assistant has now: there, and not unavailable. A button's state is the
+// moment it was last pressed, "unknown" before that, so unknown counts as there.
+static bool present(JsonObjectConst e) {
+  if (e.isNull()) return false;
+  const char *s = e["state"] | "";
+  return *s && strcmp(s, "unavailable") != 0;
+}
 
 // A sensor's number, false while it has none ("unavailable", "unknown").
 static bool number(JsonObjectConst e, float &out) {
@@ -111,6 +125,20 @@ struct Print {
   float filament = NAN;                  // metres
   float nozzle = NAN, bed = NAN, chamber = NAN, speed = NAN;
   Slot slot[SLOTS]{};
+  int slots = 0;  // one more than the last slot shown, 0 without a Box
+  // The keys' entities, there now: a printer without a camera, or a key's button gone, shows no key.
+  bool has_pause = false, has_resume = false, has_cancel = false, has_camera = false;
+  // The Box's own sensors: the step of a filament change ("" when none runs), the slot it loads (0-based, -1 when
+  // not known), how many warnings the Box reports, and whether it dries its filament.
+  char change[16] = "";
+  int change_slot = -1;
+  // Kept from one reading to the next while a change runs: whether one of its steps (cutting, unloading, loading,
+  // eject) was seen, so "changing" after them is the purge and before them the start; and the slot it loads, which
+  // the sensor drops when the task ends, before the purge.
+  bool change_stepped = false;
+  int change_target = -1;
+  int warnings = 0;
+  bool drying = false;
 
   bool running() const { return phase == Phase::PRINTING || phase == Phase::PAUSED; }
   // A layer worth showing: the file says how many there are, and the current one lies within them. Without a total
@@ -119,15 +147,11 @@ struct Print {
   bool online() const { return phase >= Phase::STANDBY; }
 
   int active() const {
-    for (int i = 0; i < SLOTS; ++i)
-      if (slot[i].chosen && slot[i].active && !slot[i].empty) return i;
+    for (int i = 0; i < slots; ++i)
+      if (slot[i].shown && slot[i].active && !slot[i].empty) return i;
     return -1;
   }
-  bool any_slot() const {
-    for (const Slot &s : slot)
-      if (s.chosen) return true;
-    return false;
-  }
+  bool any_slot() const { return slots > 0; }
 
   // The time left now: Moonraker's number counted down from when it came, while the print goes on.
   float left_now(uint32_t epoch) const {
@@ -142,6 +166,10 @@ struct Print {
   }
 
   void read(JsonObjectConst data) {
+    const bool stepped = change_stepped;
+    const int target_before = change_target;
+    Slot slots_before[SLOTS];
+    memcpy(slots_before, slot, sizeof(slot));
     *this = Print{};
     const char *wait = data["wait"] | "";
     if (!strcmp(wait, "too_large")) {
@@ -193,20 +221,46 @@ struct Print {
     number(es["chamber"].as<JsonObjectConst>(), chamber);
     number(es["speed"].as<JsonObjectConst>(), speed);
 
+    // The Box: a sensor per slot. One not chosen, or unavailable (the Box off), is not shown. One that came without
+    // its state (the add-on left it out of a full message, or it waits as too_large) keeps what it showed: the slots
+    // are the largest parts, the first to give way when the readings fill the tile's room.
     for (int i = 0; i < SLOTS; ++i) {
       JsonObjectConst se = es[SLOT_KEYS[i]].as<JsonObjectConst>();
-      Slot &sl = slot[i];
-      if (se.isNull()) continue;
+      if (!se.isNull() && !se["state"].is<const char *>()) {
+        slot[i] = slots_before[i];
+        if (slot[i].shown) slots = i + 1;
+        continue;
+      }
       const char *name = se["state"] | "";
-      if (!known(name)) continue;  // the Box is off: no slot to show
-      sl.chosen = true;
+      if (!known(name)) continue;
+      Slot &sl = slot[i];
+      sl.shown = true;
       sl.empty = !strcmp(name, "Empty");
       JsonObjectConst a = se["attributes"].as<JsonObjectConst>();
       sl.active = a["active"] | false;
       const char *type = a["filament_type"] | "";
       copy(sl.type, sizeof(sl.type), *type ? type : name);
       sl.has_color = !sl.empty && parse_color(a["color"] | "", sl.r, sl.g, sl.b);
+      slots = i + 1;
     }
+
+    // A filament change: Moonraker's Box Filament Change sensor, idle without one.
+    e = es["change"].as<JsonObjectConst>();
+    const char *c = e["state"] | "";
+    if (known(c) && strcmp(c, "idle") != 0) {
+      copy(change, sizeof(change), c);
+      const int target = e["attributes"]["target_slot"] | 0;
+      change_target = target >= 1 && target <= SLOTS ? target - 1 : target_before;
+      change_slot = change_target;
+      change_stepped = stepped || (strcmp(c, "changing") != 0 && strcmp(c, "starting") != 0 && strcmp(c, "paused") != 0);
+    }
+    if (number(es["warnings"].as<JsonObjectConst>(), v) && v > 0) warnings = static_cast<int>(lroundf(v));
+    drying = !strcmp(es["drying"]["state"] | "", "on");
+
+    has_pause = present(es["pause"].as<JsonObjectConst>());
+    has_resume = present(es["resume"].as<JsonObjectConst>());
+    has_cancel = present(es["cancel"].as<JsonObjectConst>());
+    has_camera = present(es["camera"].as<JsonObjectConst>());
   }
 };
 
@@ -296,8 +350,15 @@ struct Row {
 };
 
 // What a row may say, in the order they get the room.
-enum class Detail : uint8_t { LAYER, ELAPSED, FILAMENT, NOZZLE, BED, CHAMBER, SPEED };
-static constexpr int DETAILS = 7;
+enum class Detail : uint8_t { WARNING, CHANGE, LAYER, ELAPSED, FILAMENT, DRYING, NOZZLE, BED, CHAMBER, SPEED };
+static constexpr int DETAILS = 10;
+
+// A slot as the printer's screen names it: 1A to 1D for the first Box.
+static std::string slot_name(int i) {
+  char b[4];
+  snprintf(b, sizeof(b), "%d%c", i / SLOTS_PER_BOX + 1, 'A' + i % SLOTS_PER_BOX);
+  return b;
+}
 
 // ---- The face: the same parts on the tile and the card, laid out by the room ----
 
@@ -389,10 +450,16 @@ class Face {
     // The details, in two columns where they are wide enough, as many as fit; on the card the Box's slots at the
     // bottom of the room.
     int bottom = h;
-    if (card) {
-      box_h_ = std::max(ui::mm(9), ui::line_height(Font::BODY_LARGE) + ui::px(12));
+    // One row of four slots for each Box the printer has (the card opens with the tile's readings, so it knows);
+    // none without a Box.
+    const int boxes = rows_for(print.slots);
+    box_rows_ = card ? boxes : 0;
+    if (card && boxes > 0) {
+      const int box_gap = ui::px(6);
+      const int row = std::max(boxes > 2 ? ui::mm(7) : ui::mm(9), ui::line_height(Font::BODY_LARGE) + ui::px(10));
+      box_h_ = boxes * row + (boxes - 1) * box_gap;
       bottom = h - box_h_ - gap;
-      make_box(parent, x0, h - box_h_, cw, box_h_);
+      make_box(parent, x0, h - box_h_, cw, row, box_gap, boxes * SLOTS_PER_BOX);
     }
     // The keys (Pause or Resume, Stop, Camera) above that, on the card and on a tall tile.
     const int key_h = std::max(ui::mm(11), ui::line_height(Font::BODY_LARGE) + ui::px(20));
@@ -410,6 +477,9 @@ class Face {
   }
 
   bool shows_picture() const { return pic_ != nullptr; }
+  // The Box rows the card was laid out for, and how many the readings need now.
+  int box_rows() const { return box_rows_; }
+  static int rows_for(int slots) { return (std::min(slots, SLOTS) + SLOTS_PER_BOX - 1) / SLOTS_PER_BOX; }
 
   Controls ctl;
 
@@ -418,6 +488,12 @@ class Face {
     const int k = key_at(x, y);
     if (k < 0) return false;
     const Print &p = print;
+    // What the key does is checked again against the readings now: one that changed since the last paint (the
+    // button gone, the print over) does nothing but paint the keys again.
+    if (!key_ok(static_cast<KeyId>(k))) {
+      paint(tessera::epoch());
+      return true;
+    }
     switch (static_cast<KeyId>(k)) {
       case KeyId::PAUSE:
         tessera::action("button.press", p.phase == Phase::PAUSED ? ctl.resume : ctl.pause);
@@ -575,10 +651,7 @@ class Face {
     if (stop_armed_ && millis() - stop_armed_at_ >= STOP_CONFIRM_MS) stop_armed_ = false;
     if (!p.running() || strcmp(stop_file_, p.file) != 0) stop_armed_ = false;
     const bool paused = p.phase == Phase::PAUSED;
-    const char *pause_entity = paused ? ctl.resume : ctl.pause;
-    key_[0].shown = p.running() && *pause_entity;
-    key_[1].shown = p.running() && *ctl.cancel;
-    key_[2].shown = *ctl.camera != '\0';
+    for (int i = 0; i < KEYS; ++i) key_[i].shown = key_ok(static_cast<KeyId>(i));
     // The shown keys share the row.
     int n = 0;
     for (const Key &k : key_) n += k.shown;
@@ -621,6 +694,20 @@ class Face {
     }
   }
 
+  // Whether a key has something to do now: its entity chosen and there, and for Pause, Resume and Stop a print.
+  bool key_ok(KeyId k) const {
+    const Print &p = print;
+    switch (k) {
+      case KeyId::PAUSE:
+        return p.running() && (p.phase == Phase::PAUSED ? *ctl.resume && p.has_resume : *ctl.pause && p.has_pause);
+      case KeyId::STOP:
+        return p.running() && *ctl.cancel && p.has_cancel;
+      case KeyId::CAMERA:
+        return *ctl.camera && p.has_camera;
+    }
+    return false;
+  }
+
   int key_at(int x, int y) const {
     if (!has_keys_ || y < keys_y_ - ui::px(4) || y > keys_y_ + keys_h_ + ui::px(4)) return -1;
     for (int i = 0; i < KEYS; ++i)
@@ -639,13 +726,14 @@ class Face {
     lv_obj_set_style_radius(fill_, bar_h_ / 2, 0);
   }
 
-  void make_box(lv_obj_t *parent, int x, int y, int w, int h) {
+  void make_box(lv_obj_t *parent, int x, int top, int w, int h, int row_gap, int cells) {
     const int gap = ui::px(8);
-    const int cell = (w - (SLOTS - 1) * gap) / SLOTS;
-    const int sw = std::min(h - ui::px(12), ui::mm(6));
+    const int cell = (w - (SLOTS_PER_BOX - 1) * gap) / SLOTS_PER_BOX;
+    const int sw = std::max(ui::px(8), std::min(h - ui::px(12), ui::mm(6)));
     const int lh = ui::line_height(Font::BODY_LARGE);
-    for (int i = 0; i < SLOTS; ++i) {
-      const int cx = x + i * (cell + gap);
+    for (int i = 0; i < cells && i < SLOTS; ++i) {
+      const int cx = x + (i % SLOTS_PER_BOX) * (cell + gap);
+      const int y = top + (i / SLOTS_PER_BOX) * (h + row_gap);
       box_cell_[i] = ui::block(parent, theme::CARD);
       lv_obj_set_size(box_cell_[i], cell, h);
       lv_obj_set_pos(box_cell_[i], cx, y);
@@ -671,7 +759,7 @@ class Face {
     for (int i = 0; i < SLOTS; ++i) {
       if (!box_cell_[i]) continue;
       const Slot &s = p.slot[i];
-      const bool on = s.chosen && p.online();
+      const bool on = i < p.slots && s.shown && p.online();
       show(box_cell_[i], on);
       show(box_swatch_[i], on);
       show(box_words_[i], on);
@@ -689,6 +777,14 @@ class Face {
     const Print &p = print;
     const bool busy = p.running() || p.phase == Phase::COMPLETE;
     switch (d) {
+      case Detail::WARNING: {
+        if (!p.online() || p.warnings <= 0) return false;
+        row.paint(ICON_WARNING, p.warnings == 1 ? std::string(plugin_->text("box_warning"))
+                                                : tessera::fill(plugin_->text("box_warnings"), "n",
+                                                                std::to_string(p.warnings)));
+        ui::set_tone(row.icon, Tone::ALERT, theme::SLATE);
+        return true;
+      }
       case Detail::LAYER: {
         if (!busy || !p.layer_known()) return false;
         std::string t = tessera::fill(plugin_->text("layer"), "layer", std::to_string(p.layer));
@@ -703,6 +799,14 @@ class Face {
         row.paint(ICON_TIMER, tessera::fill(plugin_->text("elapsed"), "time", duration_text(plugin_, e)));
         return true;
       }
+      case Detail::CHANGE: {
+        // A filament change while it runs: its step and the slot it loads, with that spool's colour.
+        if (!p.change[0] || !p.online()) return false;
+        const int to = p.change_slot;
+        const Slot *spool = to >= 0 && to < p.slots && p.slot[to].shown ? &p.slot[to] : nullptr;
+        row.paint(ICON_CHANGE, change_text(p.change, to, p.change_stepped), spool);
+        return true;
+      }
       case Detail::FILAMENT: {
         // The spool that feeds the toolhead, and how much of it this print used.
         const int a = p.active();
@@ -715,6 +819,10 @@ class Face {
         row.paint(ICON_PRINTER, t, a >= 0 ? &p.slot[a] : nullptr);
         return true;
       }
+      case Detail::DRYING:
+        if (!p.online() || !p.drying) return false;
+        row.paint(ICON_DRYING, plugin_->text("box_drying"));
+        return true;
       case Detail::NOZZLE:
         if (!p.online() || !std::isfinite(p.nozzle)) return false;
         row.paint(ICON_NOZZLE, tessera::fill(plugin_->text("nozzle"), "t", degrees(p.nozzle)));
@@ -736,6 +844,29 @@ class Face {
       }
     }
     return false;
+  }
+
+  // "Cutting filament", "Loading 1D", "Purging 1D"...: the step's words, and the slot for the steps that work on it.
+  // "changing" is the purge once a step ran, and "Changing filament" before the task starts; a step without words
+  // of its own says "Changing filament" too.
+  std::string change_text(const char *step, int to, bool stepped) const {
+    struct Step { const char *step, *key; bool slot; };
+    static const Step STEPS[] = {
+        {"starting", "change_starting", false}, {"cutting", "change_cutting", false},
+        {"unloading", "change_unloading", false}, {"loading", "change_loading", true},
+        {"eject", "change_ejecting", true},       {"paused", "change_paused", false},
+    };
+    const char *key = "change_other";
+    bool slot = false;
+    if (!strcmp(step, "changing")) {
+      if (stepped) key = "change_purging", slot = true;
+    } else {
+      for (const auto &s : STEPS)
+        if (!strcmp(step, s.step)) key = s.key, slot = s.slot;
+    }
+    std::string t = plugin_->text(key);
+    if (slot && to >= 0) t += " " + slot_name(to);
+    return t;
   }
 
   std::string left_text(float left) const {
@@ -762,6 +893,7 @@ class Face {
   Row row_[DETAILS];
   Key key_[KEYS];
   bool has_keys_ = false, stop_armed_ = false;
+  int box_rows_ = 0;
   int keys_y_ = 0, keys_h_ = 0;
   uint32_t stop_armed_at_ = 0;
   char stop_file_[64] = "";
@@ -810,10 +942,11 @@ class PrintTile : public tessera::Tile {
 
 class DetailCard : public tessera::Card {
  public:
-  explicit DetailCard(QidiPrint *plugin) : face_(plugin) {}
+  explicit DetailCard(QidiPrint *plugin) : plugin_(plugin), face_(plugin) {}
 
   void open(const tessera::CardContext &c) override {
     tile_ = c.tile;
+    copy(entity_, sizeof(entity_), c.entity);
     face_.print = opened_print;
     face_.ctl = opened_controls;
     face_.build(c.parent, c.width, c.height, true, c.entity ? c.entity : "");
@@ -823,6 +956,14 @@ class DetailCard : public tessera::Card {
     // A tile of Tessera's own sends {"state", "name"}: only a plugin tile's data has the sensors.
     if (data["entities"].isNull() && data["wait"].isNull()) return;
     face_.print.read(data);
+    // A Box more or less than the card was laid out for (one switched on or off): open the card again, so its rows
+    // of slots fit. The card leaves the glass at once and gets no call after this one.
+    if (Face::rows_for(face_.print.slots) != face_.box_rows()) {
+      opened_print = face_.print;
+      opened_controls = face_.ctl;
+      tessera::open_card(plugin_->plugin_id(), "detail", entity_, tile_);
+      return;
+    }
     face_.paint(tessera::epoch());
   }
   void on_tick(uint32_t epoch) override { face_.paint(epoch); }
@@ -834,8 +975,10 @@ class DetailCard : public tessera::Card {
   }
 
  private:
+  QidiPrint *plugin_;
   Face face_;
   int tile_ = -1;
+  char entity_[96] = "";
 };
 
 // ---- The camera: the printer's camera over the whole room, a tap closes it ----

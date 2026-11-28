@@ -1,9 +1,9 @@
 # QIDI print: how a print on a QIDI (or any Moonraker / Klipper) printer is coming along, on a tile and on a card: the
 # file, the thumbnail, the progress, the time left and when it is done, the layer, the filament in use and the
-# temperatures. The sensors come from the Moonraker integration and, for the filament, the QIDI Box integration. Every
-# name, label and hint is a key into translations/<language>.json, part "app".
+# temperatures, and on a QIDI Box its filaments, filament changes, warnings and drying. Every sensor comes from the
+# Moonraker integration. Every name, label and hint is a key into translations/<language>.json, part "app".
 id: qidi_print
-version: 0.2.0
+version: 0.3.0
 api: "0.27"
 icon: printer-3d
 maintainer: Luca-Bachini-Barr
@@ -28,36 +28,42 @@ tiles:
     # share for about 34 labels and blocks, and the 9 of the keys.
     memory: 4600
     # The tile's own entity: the printer's thumbnail camera (its picture shows beside the print), or, on a screen
-    # without pictures, any of the printer's sensors.
+    # without pictures, any of the printer's sensors. Nothing is filled in for a particular printer: Fill from a
+    # device picks the Moonraker printer and fills every option it has an entity for (the Box ones too).
     domains: [camera, sensor]
     pictures: 1
     example: tile_example
-    # The Moonraker device has every sensor but the Box's: one pick fills them.
+    # The Moonraker device holds every sensor, the Box's too: one pick fills them.
     from_device: true
     options:
-      - { id: print_state, kind: entity, domains: [sensor], matches: [print_state, current_print_state], default: sensor.q2_current_print_state, label: opt_print_state, hint: opt_print_state_hint }
-      - { id: filename, kind: entity, domains: [sensor], matches: [filename], default: sensor.q2_filename, label: opt_filename }
-      - { id: progress, kind: entity, domains: [sensor], matches: [progress], default: sensor.q2_progress, label: opt_progress }
-      - { id: time_left, kind: entity, domains: [sensor], attributes: [unit_of_measurement], matches: [print_time_left], default: sensor.q2_print_time_left, label: opt_time_left }
-      - { id: duration, kind: entity, domains: [sensor], attributes: [unit_of_measurement], matches: [print_duration], default: sensor.q2_print_duration, label: opt_duration }
-      - { id: current_layer, kind: entity, domains: [sensor], matches: [current_layer], default: sensor.q2_current_layer, label: opt_current_layer }
-      - { id: total_layer, kind: entity, domains: [sensor], matches: [total_layer], default: sensor.q2_total_layer, label: opt_total_layer }
-      - { id: filament_used, kind: entity, domains: [sensor], attributes: [unit_of_measurement], matches: [filament_used], default: sensor.q2_filament_used, label: opt_filament_used }
-      - { id: nozzle, kind: entity, domains: [sensor], device_class: [temperature], matches: [extruder_temperature], default: sensor.q2_extruder_temperature, label: opt_nozzle, group: group_temps }
-      - { id: bed, kind: entity, domains: [sensor], device_class: [temperature], matches: [bed_temperature], default: sensor.q2_bed_temperature, label: opt_bed, group: group_temps }
-      - { id: chamber, kind: entity, domains: [sensor], device_class: [temperature], matches: [chamber_temperature], default: sensor.q2_chamber_temperature, label: opt_chamber, group: group_temps }
-      - { id: speed, kind: entity, domains: [sensor], matches: [print_speed], default: sensor.q2_print_speed, label: opt_speed, group: group_temps }
-      # The QIDI Box: the slot that feeds the toolhead says "active", and its colour and type.
-      - { id: slot1, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_1_filament], default: sensor.dining_room_q2_box_slot_1_filament, label: opt_slot1, hint: opt_slot_hint, group: group_box }
-      - { id: slot2, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_2_filament], default: sensor.dining_room_q2_box_slot_2_filament, label: opt_slot2, group: group_box }
-      - { id: slot3, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_3_filament], default: sensor.dining_room_q2_box_slot_3_filament, label: opt_slot3, group: group_box }
-      - { id: slot4, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_4_filament], default: sensor.dining_room_q2_box_slot_4_filament, label: opt_slot4, group: group_box }
-      # The keys: the Moonraker buttons they press, and the camera the Camera key opens.
-      - { id: pause, kind: entity, domains: [button], matches: [pause_print], default: button.q2_pause_print, label: opt_pause, group: group_controls }
-      - { id: resume, kind: entity, domains: [button], matches: [resume_print], default: button.q2_resume_print, label: opt_resume, group: group_controls }
-      - { id: cancel, kind: entity, domains: [button], matches: [cancel_print], default: button.q2_cancel_print, label: opt_cancel, hint: opt_cancel_hint, group: group_controls }
+      - { id: print_state, kind: entity, domains: [sensor], matches: [print_state, current_print_state], label: opt_print_state, hint: opt_print_state_hint }
+      - { id: filename, kind: entity, domains: [sensor], matches: [filename], label: opt_filename }
+      - { id: progress, kind: entity, domains: [sensor], matches: [progress], label: opt_progress }
+      - { id: time_left, kind: entity, domains: [sensor], attributes: [unit_of_measurement], matches: [print_time_left], label: opt_time_left }
+      - { id: duration, kind: entity, domains: [sensor], attributes: [unit_of_measurement], matches: [print_duration], label: opt_duration }
+      - { id: current_layer, kind: entity, domains: [sensor], matches: [current_layer], label: opt_current_layer }
+      - { id: total_layer, kind: entity, domains: [sensor], matches: [total_layer], label: opt_total_layer }
+      - { id: filament_used, kind: entity, domains: [sensor], attributes: [unit_of_measurement], matches: [filament_used], label: opt_filament_used }
+      - { id: nozzle, kind: entity, domains: [sensor], device_class: [temperature], matches: [extruder_temperature], label: opt_nozzle, group: group_temps }
+      - { id: bed, kind: entity, domains: [sensor], device_class: [temperature], matches: [bed_temperature], label: opt_bed, group: group_temps }
+      - { id: chamber, kind: entity, domains: [sensor], device_class: [temperature], matches: [chamber_temperature], label: opt_chamber, group: group_temps }
+      - { id: speed, kind: entity, domains: [sensor], matches: [print_speed], label: opt_speed, group: group_temps }
+      # The QIDI Box: Moonraker's Box Slot N Filament sensor per slot, and its Box Filament Change, Box Warnings and Box
+      # 1 Drying. Left empty on a printer without a Box: the filament line then shows the metres used alone.
+      - { id: slot1, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_1_filament], label: opt_slot1, hint: opt_slot_hint, group: group_box }
+      - { id: slot2, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_2_filament], label: opt_slot2, group: group_box }
+      - { id: slot3, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_3_filament], label: opt_slot3, group: group_box }
+      - { id: slot4, kind: entity, domains: [sensor], attributes: [color, active, filament_type], matches: [box_slot_4_filament], label: opt_slot4, group: group_box }
+      - { id: change, kind: entity, domains: [sensor], attributes: [target_slot], matches: [box_filament_change], label: opt_change, hint: opt_change_hint, group: group_box }
+      - { id: warnings, kind: entity, domains: [sensor], matches: [box_warnings], label: opt_warnings, group: group_box }
+      - { id: drying, kind: entity, domains: [binary_sensor], matches: [box_1_drying], label: opt_drying, group: group_box }
+      # The keys: the Moonraker buttons they press, and the camera the Camera key opens. A key whose entity is not
+      # chosen, gone or unavailable is not shown: a printer without a camera has no Camera key.
+      - { id: pause, kind: entity, domains: [button], matches: [pause_print], label: opt_pause, group: group_controls }
+      - { id: resume, kind: entity, domains: [button], matches: [resume_print], label: opt_resume, group: group_controls }
+      - { id: cancel, kind: entity, domains: [button], matches: [cancel_print], label: opt_cancel, hint: opt_cancel_hint, group: group_controls }
       # Moonraker names a camera after its webcam's name in Moonraker: these are the usual ones.
-      - { id: camera, kind: entity, domains: [camera], matches: [qidi, webcam, camera, cam, default], default: camera.q2_qidi, label: opt_camera, hint: opt_camera_hint, group: group_controls }
+      - { id: camera, kind: entity, domains: [camera], matches: [qidi, webcam, camera, cam, default], label: opt_camera, hint: opt_camera_hint, group: group_controls }
 
 cards:
   - { id: detail, name: card_name, wide: true, pictures: 1 }

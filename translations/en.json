@@ -37,7 +37,18 @@
     "stop": "Stop",
     "stop_confirm": "Tap again to stop",
     "camera": "Camera",
-    "no_camera": "The camera has no picture"
+    "no_camera": "The camera has no picture",
+    "change_starting": "Starting filament change",
+    "change_cutting": "Cutting filament",
+    "change_unloading": "Unloading filament",
+    "change_loading": "Loading",
+    "change_purging": "Purging",
+    "change_ejecting": "Ejecting",
+    "change_paused": "Filament change paused",
+    "change_other": "Changing filament",
+    "box_warning": "Box warning",
+    "box_warnings": "{n} Box warnings",
+    "box_drying": "Box drying"
   },
   "app": {
     "name": "QIDI print",
@@ -58,11 +69,6 @@
     "opt_bed": "Bed temperature",
     "opt_chamber": "Chamber temperature",
     "opt_speed": "Print speed",
-    "opt_slot1": "Box slot 1",
-    "opt_slot2": "Box slot 2",
-    "opt_slot3": "Box slot 3",
-    "opt_slot4": "Box slot 4",
-    "opt_slot_hint": "The QIDI Box integration's slot sensors: the active slot is the filament in use.",
     "group_temps": "Temperatures and speed",
     "group_box": "QIDI Box",
     "card_camera": "Camera",
@@ -71,7 +77,16 @@
     "opt_cancel": "Cancel button",
     "opt_cancel_hint": "Stop asks for a second tap within 5 seconds before it cancels the print.",
     "opt_camera": "Printer camera",
-    "opt_camera_hint": "The camera the Camera key opens, full screen.",
-    "group_controls": "Keys"
+    "opt_camera_hint": "The camera the Camera key opens, full screen. Leave it empty on a printer without a camera.",
+    "group_controls": "Keys",
+    "opt_slot1": "Box slot 1",
+    "opt_slot2": "Box slot 2",
+    "opt_slot3": "Box slot 3",
+    "opt_slot4": "Box slot 4",
+    "opt_slot_hint": "Moonraker's Box Slot N Filament sensors: the slot marked active is the filament in use. Leave them empty without a Box.",
+    "opt_change": "Box filament change",
+    "opt_change_hint": "Moonraker's Box Filament Change sensor: shows each step of a filament change and the slot it loads.",
+    "opt_warnings": "Box warnings",
+    "opt_drying": "Box drying"
   }
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 - 2026-11-27
+- For every QIDI printer on Moonraker (Q1 Pro, Plus4, Q2, X-Max 3, X-Plus 3...), with or without a Box and a camera.
+  Nothing is filled in for one printer any more: **Fill from a device** fills the sensors, the Box and the keys.
+- Every reading comes from the Moonraker integration. The Box slots read its Box Slot N Filament sensors (proposed in
+  moonraker-home-assistant#859). Without a Box the Box row is not drawn; a Box switched on or off while the card is
+  open lays the card out again.
+- The Box's filament changes, from Moonraker's Box Filament Change sensor: a row says each step (Cutting filament,
+  Unloading filament, Loading 1D, Purging 1D, Ejecting 1A) with the colour of the spool it loads.
+- Box warnings (Moonraker's Box Warnings) and Box drying (Box 1 Drying) get a row of their own while they apply.
+- A key whose entity is not there or is unavailable does not show: no Camera key on a printer without a camera, and no
+  Pause, Resume or Stop without the printer's buttons.
+
 ## 0.2.0 - 2026-11-27
 - Keys on the tile (when it is tall enough) and on the card: Pause or Resume, Stop and Camera. They press the
   printer's own Moonraker buttons; Stop asks for a second tap within 5 seconds before it cancels the print.
